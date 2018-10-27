@@ -42,6 +42,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <io.h>
+#include <fcntl.h>
+#endif
+
 static void _printTaskTime(void *item, void *userData) {
   TaskTimer taskTimer = (TaskTimer)item;
   TaskTimer totalTimer = (TaskTimer)userData;
@@ -353,6 +358,10 @@ int mrsWatsonMain(ErrorReporter errorReporter, int argc, char **argv) {
   boolByte finishedReading = false;
   SampleSource silentSampleOutput;
   unsigned int i;
+
+	#ifdef _WIN32
+	_setmode(_fileno(stdout), _O_BINARY);
+	#endif // _WIN32	
 
   initTimer = newTaskTimerWithCString(PROGRAM_NAME, "Initialization");
   totalTimer = newTaskTimerWithCString(PROGRAM_NAME, "Total Time");
