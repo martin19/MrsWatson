@@ -135,6 +135,7 @@ static boolByte _readMidiFileTrack(FILE *midiFile, const int trackNumber,
   unsigned long currentTimeInSampleFrames = 0;
   unsigned long unpackedVariableLength;
   MidiEvent midiEvent = NULL;
+  byte currentStatus = 0;
   unsigned int i;
 
   if (!_readMidiFileChunkHeader(midiFile, "MTrk")) {
@@ -182,47 +183,56 @@ static boolByte _readMidiFileTrack(FILE *midiFile, const int trackNumber,
     freeMidiEvent(midiEvent);
     midiEvent = newMidiEvent();
 
-    switch (*currentByte) {
-    case 0xff:
-      midiEvent->eventType = MIDI_TYPE_META;
-      currentByte++;
-      midiEvent->status = *(currentByte++);
-      numBytes = *(currentByte++);
-      midiEvent->extraData = (byte *)malloc(numBytes);
+	//MSB is not set, we have a data byte
+	if (!(*currentByte & 0x80)) {
+		midiEvent->eventType = MIDI_TYPE_REGULAR;
+		midiEvent->status = currentStatus;
+		midiEvent->data1 = *currentByte++;
+		midiEvent->data2 = *currentByte++;
+	} else {
+		switch (*currentByte) {
+		case 0xff:
+		  midiEvent->eventType = MIDI_TYPE_META;
+		  currentByte++;
+		  midiEvent->status = *(currentByte++);
+		  numBytes = *(currentByte++);
+		  midiEvent->extraData = (byte *)malloc(numBytes);
 
-      for (i = 0; i < numBytes; i++) {
-        midiEvent->extraData[i] = *(currentByte++);
-      }
+		  for (i = 0; i < numBytes; i++) {
+			midiEvent->extraData[i] = *(currentByte++);
+		  }
 
-      break;
+		  break;
 
-    case 0x7f:
-      logUnsupportedFeature("MIDI files containing sysex events");
-      free(trackData);
-      freeMidiEvent(midiEvent);
-      return false;
+		case 0x7f:
+		  logUnsupportedFeature("MIDI files containing sysex events");
+		  free(trackData);
+		  freeMidiEvent(midiEvent);
+		  return false;
 
-    default:
-      midiEvent->eventType = MIDI_TYPE_REGULAR;
-      midiEvent->status = *currentByte++;
-      midiEvent->data1 = *currentByte++;
+		default:
+		  midiEvent->eventType = MIDI_TYPE_REGULAR;
+		  midiEvent->status = *currentByte++;			
+		  midiEvent->data1 = *currentByte++;
 
-      // All regular MIDI events have 3 bytes except for program change and
-      // channel aftertouch
-      if (!((midiEvent->status & 0xf0) == 0xc0 ||
-            (midiEvent->status & 0xf0) == 0xd0)) {
-        midiEvent->data2 = *currentByte++;
-      }
+		  // All regular MIDI events have 3 bytes except for program change and
+		  // channel aftertouch
+		  if (!((midiEvent->status & 0xf0) == 0xc0 ||
+				(midiEvent->status & 0xf0) == 0xd0)) {
+			midiEvent->data2 = *currentByte++;
+		  }
 
-      break;
-    }
+			currentStatus = midiEvent->status;
+		  break;
+		}
+	}
 
     switch (divisionType) {
-    case TIME_DIVISION_TYPE_TICKS_PER_BEAT: {
+    case TIME_DIVISION_TYPE_TICKS_PER_BEAT: {			
       double ticksPerSecond = (double)timeDivision * getTempo() / 60.0;
       double sampleFramesPerTick = getSampleRate() / ticksPerSecond;
       currentTimeInSampleFrames +=
-          (long)(unpackedVariableLength * sampleFramesPerTick);
+          (long)(unpackedVariableLength * sampleFramesPerTick);			
     } break;
 
     case TIME_DIVISION_TYPE_FRAMES_PER_SECOND:
@@ -262,7 +272,9 @@ static boolByte _readMidiFileTrack(FILE *midiFile, const int trackNumber,
                  midiEvent->status, midiEvent->timestamp);
         break;
 
-      case MIDI_META_TYPE_TEMPO:
+			case MIDI_META_TYPE_TEMPO: {
+				setTempoFromMidiBytes(midiEvent->extraData);
+			}				
       case MIDI_META_TYPE_TIME_SIGNATURE:
       case MIDI_META_TYPE_TRACK_END:
         logDebug("Parsed MIDI meta event of type 0x%02x at %ld",
